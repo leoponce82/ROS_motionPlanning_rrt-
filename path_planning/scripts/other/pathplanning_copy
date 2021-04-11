@@ -1,0 +1,199 @@
+#!/usr/bin/env python
+import rospy
+import sys
+import os
+import json
+from std_msgs.msg import Int32MultiArray
+from std_msgs.msg import String
+
+import random, math, pygame
+from pygame.locals import *
+from math import sqrt,cos,sin,atan2
+from lineIntersect import *
+XDIM = 640
+YDIM = 480
+WINSIZE = [XDIM, YDIM]
+EPSILON = 25.0
+NUMNODES = 100
+RADIUS=50
+OBS=[(500,150,100,50),(300,80,100,50),(150,220,100,50)]
+
+#from aruco_msgs.msg import MarkerArray
+obstaculos=[]
+aruco=[]
+ids=[]
+
+def obsDraw(pygame,screen):
+	blue=(0,0,255)
+	for o in OBS: 
+		pygame.draw.rect(screen,blue,o)
+
+def dist(p1,p2):
+	return sqrt((p1[0]-p2[0])*(p1[0]-p2[0])+(p1[1]-p2[1])*(p1[1]-p2[1]))
+
+def step_from_to(p1,p2):
+	if dist(p1,p2) < EPSILON:
+		return p2
+	else:
+		theta = atan2(p2[1]-p1[1],p2[0]-p1[0])
+		return p1[0] + EPSILON*cos(theta), p1[1] + EPSILON*sin(theta)
+
+def chooseParent(nn,newnode,nodes):
+	for p in nodes:
+		if checkIntersect(p,newnode,OBS) and dist([p.x,p.y],[newnode.x,newnode.y]) <RADIUS and p.cost+dist([p.x,p.y],[newnode.x,newnode.y]) < nn.cost+dist([nn.x,nn.y],[newnode.x,newnode.y]):
+			nn = p
+	newnode.cost=nn.cost+dist([nn.x,nn.y],[newnode.x,newnode.y])
+	newnode.parent=nn
+	return newnode,nn
+
+def reWire(nodes,newnode,pygame,screen):
+	white = 255, 240, 200
+	black = 20, 20, 40
+	for i in range(len(nodes)):
+		p = nodes[i]
+		if checkIntersect(p,newnode,OBS) and p!=newnode.parent and dist([p.x,p.y],[newnode.x,newnode.y]) <RADIUS and newnode.cost+dist([p.x,p.y],[newnode.x,newnode.y]) < p.cost:
+			pygame.draw.line(screen,white,[p.x,p.y],[p.parent.x,p.parent.y])  
+			p.parent = newnode
+			p.cost=newnode.cost+dist([p.x,p.y],[newnode.x,newnode.y]) 
+			nodes[i]=p  
+			pygame.draw.line(screen,black,[p.x,p.y],[newnode.x,newnode.y])                    
+	return nodes
+
+def drawSolutionPath(start,goal,nodes,pygame,screen):
+	pink = 200, 20, 240
+	nn = nodes[0]
+	for p in nodes:
+		if dist([p.x,p.y],[goal.x,goal.y]) < dist([nn.x,nn.y],[goal.x,goal.y]):
+			nn = p
+	while nn!=start:
+		pygame.draw.line(screen,pink,[nn.x,nn.y],[nn.parent.x,nn.parent.y],2)  
+		nn=nn.parent
+
+class Cost:
+	x = 0
+	y = 0
+	cost=0  
+	parent=None
+	def __init__(self,xcoord, ycoord):
+		self.x = xcoord
+		self.y = ycoord
+
+class Node:
+	x = 0
+	y = 0
+	cost=0  
+	parent=None
+	def __init__(self,xcoord, ycoord):
+		self.x = xcoord
+		self.y = ycoord
+	
+def callback(data):
+	os.system('clear')
+	print("##########")
+	print(data)
+	with open('/home/proyinv/ponce_ws/src/cam_test/scripts/coord_obstaculos_aruco.json') as f:
+		data_json = json.load(f)
+	n=0
+	obstaculos=[]
+	for item in data_json['obstaculos']:
+		index=item['index']
+		coord=item['coord']
+		obstaculos.append(coord)
+		n=n+1
+	print("Obstaculos:")
+	print(obstaculos)
+	n=0
+	aruco=[]
+	for item in data_json['aruco']:
+		index=item['index']
+		coord=item['coord']
+		aruco.append(coord)
+		n=n+1
+	print("Aruco:")
+	print(aruco)
+	n=0
+	ids=[]
+	for item in data_json['ids']:
+		index=item['index']
+		id_aruco=item['id']
+		ids.append(id_aruco)
+		n=n+1
+	print("Aruco IDs:")
+	print(ids)
+	
+	#rospy.loginfo("coordenada x: %f", c.markers[0].pose.pose.orientation.x)
+	#rospy.loginfo("coordenada y: %f", c.markers[0].pose.pose.orientation.y)
+	#rospy.loginfo("coordenada z: %f", c.markers[0].pose.pose.orientation.z)
+	#rospy.loginfo("coordenada rot x: %f", c.markers[0].pose.pose.orientation.x)
+	#rospy.loginfo("coordenada rot y: %f", c.markers[0].pose.pose.orientation.y)
+	#rospy.loginfo("coordenada rot z: %f", c.markers[0].pose.pose.orientation.z)
+	#rospy.loginfo("coordenada rot w: %f", c.markers[0].pose.pose.orientation.w)
+
+	#rospy.loginfo("punto %s", c.coordenadas_contornos.data)
+
+   
+def path_planning():
+	rospy.init_node('path_planning', anonymous=True)
+	rospy.Subscriber("/coord_obstaculos_aruco", String, callback)
+	
+	
+	pygame.init()
+	screen = pygame.display.set_mode(WINSIZE)
+	pygame.display.set_caption('RRTstar')
+	white = 255, 255, 255
+	black = 20, 20, 40
+	screen.fill(white)
+	obsDraw(pygame,screen)
+	nodes = []
+    
+	#nodes.append(Node(XDIM/2.0,YDIM/2.0)) # Start in the center
+	nodes.append(Node(0.0,0.0)) # Start in the corner
+	start=nodes[0]
+	goal=Node(630.0,100.0)
+	for i in range(NUMNODES):
+    	
+		print("#### iteracion numero:",i)
+		rand = Node(random.random()*XDIM, random.random()*YDIM)#Saca una coordenada random de X y Y
+		print("random:",rand.x,rand.y)
+		nn = nodes[0]
+		print("nodo nn:",nn.x,nn.y)
+        
+		for p in nodes:
+			print("nodes lista:", p.x,p.y)
+			if dist([p.x,p.y],[rand.x,rand.y]) < dist([nn.x,nn.y],[rand.x,rand.y]):
+				print("distancia de nodo", p.x,p.y, "a nodo rand",rand.x,rand.y, "es nenor a ","distancia de nodo", nn.x,nn.y, "a nodo rand",rand.x,rand.y)
+				nn = p
+				print("nodo nn cambio a:",nn.x,nn.y)
+		interpolatedNode= step_from_to([nn.x,nn.y],[rand.x,rand.y])
+	
+		newnode = Node(interpolatedNode[0],interpolatedNode[1])
+		print("nodo new node:",newnode.x,newnode.y)
+		if checkIntersect(nn,rand,OBS):
+          		print("no se interseca nn con rand ni OBS")
+			[newnode,nn]=chooseParent(nn,newnode,nodes);
+			print "nuevo new node:", newnode.x,newnode.y, "nuevo nn:", nn.x,nn.y
+       
+			nodes.append(newnode)
+			pygame.draw.line(screen,black,[nn.x,nn.y],[newnode.x,newnode.y])
+			nodes=reWire(nodes,newnode,pygame,screen)
+			pygame.display.update()
+			#print i, "    ", nodes
+
+			for e in pygame.event.get():
+				if e.type == QUIT or (e.type == KEYUP and e.key == K_ESCAPE):
+					sys.exit("Leaving because you requested it.")
+	drawSolutionPath(start,goal,nodes,pygame,screen)
+	pygame.display.update()
+
+	rospy.spin()
+
+if __name__ == '__main__':
+	
+	path_planning()
+	running = True
+	while running:
+		for event in pygame.event.get():
+			if event.type == pygame.QUIT:
+				running = False
+
+
