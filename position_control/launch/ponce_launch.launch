@@ -1,8 +1,0 @@
-<launch>
-  <node pkg="cam_test" name="cam_test" type="mapa2d.py" >
-  </node>
-  <node pkg="collisions_monitor" name="collisions_monitor" type="colision_monitor.py" >
-  </node>
-  <node pkg="position_control" name="position_control" type="position_control_pid.py" output="screen">
-  </node>
-</launch>
